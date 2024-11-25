@@ -1,5 +1,5 @@
 # Circulating supply-based unvesting
-This Scrypto blueprint provides a mechanism to vest tokens based on the percentage of circulating tokens. The design ensures that the total unvested tokens are always smaller than a chosen percentage of the circulating supply.
+This Scrypto blueprint provides a mechanism to vest tokens based on the amount of circulating tokens. The design ensures that the total unvested tokens is always smaller than a chosen percentage of the circulating supply.
 
 ## Example Scenario
 Let's consider a token:
@@ -23,7 +23,7 @@ max_tokens_unvested = 0.20 * ((1,000,000 - 500,000 - 300,000) / (1 - 0.20))
 
 We can see that the vester can at maximum have unvested 50,000 tokens, let's check whether this is correct:
 
-There are 200,000 circulating tokens not originating from the vest. If the vester unvests 50,000 a total of 200,000 + 50,000 tokens is circulating. 50,000 / 250,000 = 0.2, so the vester has unvested 20% of the circulating supply.
+There are 200,000 circulating tokens not originating from the vest. If the vester unvests 50,000 a total of 200,000 + 50,000 tokens is circulating. 50,000 / 250,000 = 0.2, so the vester has unvested 20% of the circulating supply. All good so far!
 
 ## Use case
 So, why would you want to vest in such a convoluted way? One reason might be that you have two parties with conflicting agendas, that still want to agree on a vest.
