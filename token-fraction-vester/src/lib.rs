@@ -4,6 +4,7 @@ use scrypto::prelude::*;
 pub struct TokenAmountCall {
     pub method_name: String,
     pub component_address: ComponentAddress,
+    pub with_arg: bool,
     pub initialized: bool,
 }
 
@@ -24,8 +25,7 @@ mod percentage_vester {
             initialize_uninitialized => restrict_to: [vester];
             put_back_tokens => restrict_to: [vester];
             unvest_tokens => restrict_to: [vester];
-            emergency_unvest_now => restrict_to: [overseer];
-            emergency_unvest_toggle => restrict_to: [vester];
+            emergency_unvest_allow => restrict_to: [overseer];
             emergency_unvest => restrict_to: [vester];
         }
     }
@@ -43,16 +43,12 @@ mod percentage_vester {
         token_vault: Vault,
         //address of vested token
         vested_token_address: ResourceAddress,
-        //time when owner can unvest all tokens (used for emergency)
-        emergency_unvest_date: Option<Instant>,
-        //length of emergency unvested
-        emergency_unvest_length: i64,
+        //whether emergency unvest has been turned on
+        emergency_unvest: bool,
     }
 
     impl PercentageVester {
-        pub fn instantiate_vest(tokens_to_vest: Bucket, max_percentage_unvested: Decimal, method_calls: Vec<TokenAmountCall>, overseer_address: ResourceAddress, emergency_unvest_length: i64) -> (Global<PercentageVester>, Bucket) {
-
-            let vested_token_address: ResourceAddress = tokens_to_vest.resource_address();
+        pub fn instantiate_vest(tokens_to_vest: Bucket, max_percentage_unvested: Decimal, method_calls: Vec<TokenAmountCall>, overseer_address: ResourceAddress, vested_token_address: ResourceAddress) -> (Global<PercentageVester>, Bucket) {
             let tokens_initially_vested: Decimal = tokens_to_vest.amount();
             let overseer_access_rule: AccessRule = rule!(require(overseer_address));
 
@@ -74,8 +70,7 @@ mod percentage_vester {
                 method_calls,
                 token_vault: Vault::with_bucket(tokens_to_vest),
                 vested_token_address,
-                emergency_unvest_date: None,
-                emergency_unvest_length
+                emergency_unvest: false,
             }
             .instantiate()
             .prepare_to_globalize(OwnerRole::Fixed(rule!(require(vester_token.resource_address()))))
@@ -95,8 +90,13 @@ mod percentage_vester {
             //sorry for the non-iter loop Daan
             for call in &self.method_calls {
                 let component: Global<AnyComponent> = Global::from(call.component_address);
-                let tokens_to_add: Decimal = component.call_raw(&call.method_name, scrypto_args!(()));
-                non_circulating_tokens += tokens_to_add;
+                if call.with_arg {
+                    let tokens_to_add: Decimal = component.call_raw(&call.method_name, scrypto_args!(self.vested_token_address));
+                    non_circulating_tokens += tokens_to_add;
+                } else {
+                    let tokens_to_add: Decimal = component.call_raw(&call.method_name, scrypto_args!());
+                    non_circulating_tokens += tokens_to_add;
+                } 
             }
 
             let max_tokens_unvested: Decimal = self.max_percentage_unvested * ((token_supply - self.tokens_initially_vested - non_circulating_tokens) / (1 - self.max_percentage_unvested));
@@ -112,10 +112,11 @@ mod percentage_vester {
             self.tokens_unvested
         }
 
-        pub fn add_method_call(&mut self, method_name: String, component_address: ComponentAddress) {
+        pub fn add_method_call(&mut self, method_name: String, with_arg: bool, component_address: ComponentAddress) {
             let call = TokenAmountCall {
                 method_name,
                 component_address,
+                with_arg,
                 initialized: false,
             };
             self.method_calls.push(call);
@@ -138,7 +139,11 @@ mod percentage_vester {
             for call in &self.method_calls {
                 if !call.initialized {
                     let component: Global<AnyComponent> = Global::from(call.component_address);
-                    let _test_dec: Decimal = component.call_raw(&call.method_name, scrypto_args!(()));
+                    if call.with_arg {
+                        let _test_dec: Decimal = component.call_raw(&call.method_name, scrypto_args!(self.vested_token_address));
+                    } else {
+                        let _test_dec: Decimal = component.call_raw(&call.method_name, scrypto_args!());
+                    }
                 }
             }
         }
@@ -147,8 +152,15 @@ mod percentage_vester {
             let amount_unvestable: Decimal = self.get_amount_unvestable();
 
             if amount_unvestable > dec!(0) {
-                self.tokens_unvested += amount_unvestable;
-                Some(self.token_vault.take(amount_unvestable))
+                
+                //this could be nicer but this will definitely work always without any rounding error bullcrap
+                if amount_unvestable > self.token_vault.amount() {
+                    self.tokens_unvested += self.token_vault.amount();
+                    Some(self.token_vault.take_all())
+                } else {
+                    self.tokens_unvested += amount_unvestable;
+                    Some(self.token_vault.take(amount_unvestable))
+                }
             } else {
                 None
             }
@@ -159,28 +171,14 @@ mod percentage_vester {
             self.token_vault.put(tokens);
         }
 
-        pub fn emergency_unvest_toggle(&mut self) {
-            if self.emergency_unvest_date.is_some() {
-                self.emergency_unvest_date = None;
-            } else {
-                self.emergency_unvest_date = Some(Clock::current_time_rounded_to_seconds().add_days(self.emergency_unvest_length).unwrap())
-            }
+        pub fn emergency_unvest_allow(&mut self) {
+            self.emergency_unvest = true;
         }
 
-        pub fn emergency_unvest_now(&mut self) {
-            self.emergency_unvest_date = Some(Clock::current_time_rounded_to_seconds());
-        }
+        pub fn emergency_unvest(&mut self) -> Bucket {
+            assert!(self.emergency_unvest, "Emergency unvest not allowed!");
 
-        pub fn emergency_unvest(&mut self) -> Option<Bucket> {
-            if let Some(date) = self.emergency_unvest_date {
-                if date.compare(Clock::current_time_rounded_to_seconds(), TimeComparisonOperator::Gte) {
-                    Some(self.token_vault.take_all())
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
+            self.token_vault.take_all()
         }
     }
 }
