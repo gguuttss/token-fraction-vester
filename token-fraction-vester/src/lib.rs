@@ -136,7 +136,7 @@ mod percentage_vester {
 
         pub fn initialize_uninitialized(&mut self) {
             //Daan don't kill me, for loops are just more readable than iter() + filter...
-            for call in &self.method_calls {
+            for call in &mut self.method_calls {
                 if !call.initialized {
                     let component: Global<AnyComponent> = Global::from(call.component_address);
                     if call.with_arg {
@@ -144,6 +144,7 @@ mod percentage_vester {
                     } else {
                         let _test_dec: Decimal = component.call_raw(&call.method_name, scrypto_args!());
                     }
+                    call.initialized = true;
                 }
             }
         }
